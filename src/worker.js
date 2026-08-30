@@ -58,7 +58,7 @@ function checkPasscode(request, env) {
   return provided && provided === env.TEAM_PASSCODE;
 }
 
-async function callDeepSeek(env, { system, parts, maxTokens = 2000, vision = false }) {
+async function callDeepSeek(env, { system, parts, maxTokens = 2000, vision = false, models: requestedModels }) {
   if (!env.DEEPSEEK_API_KEY) {
     throw new Error("Cloudflare 尚未配置 DEEPSEEK_API_KEY");
   }
@@ -74,7 +74,7 @@ async function callDeepSeek(env, { system, parts, maxTokens = 2000, vision = fal
     }
     return { type: "text", text: part.text || "" };
   });
-  const models = vision ? DEEPSEEK_VISION_MODELS : DEEPSEEK_TEXT_MODELS;
+  const models = requestedModels || (vision ? DEEPSEEK_VISION_MODELS : DEEPSEEK_TEXT_MODELS);
 
   let lastError = "";
   for (const model of models) {
@@ -287,7 +287,7 @@ async function handleBulkImport(request, env) {
 }
 
 async function handleGenerate(request, env) {
-  const { productId, brief } = await request.json();
+  const { productId, tone, brief } = await request.json();
 
   const productRaw = await env.LIBRARY_KV.get(`product:${productId}`);
   if (!productRaw) return json({ error: "产品未找到" }, 404);
@@ -342,29 +342,67 @@ async function handleGenerate(request, env) {
   const selected = competitors.filter((c) => selectedIds.includes(c.id));
   const finalSelected = selected.length > 0 ? selected : competitors.slice(0, 3);
 
+  // 先用视觉模型提炼产品自身的视觉语言，再交给更强的文字模型写成品文案。
+  let visualDirection = {};
+  if (productImages.length > 0) {
+    try {
+      const visualText = await callDeepSeek(env, {
+        system: `你是品牌视觉策略师。请只根据产品图片和已提供的产品事实，提炼可用于电商文案创作的视觉调性。输出 JSON：
+{
+  "视觉气质": "",
+  "核心意象": [],
+  "色彩材质感受": [],
+  "适合的语言质感": "",
+  "不适合的表达": []
+}
+不得猜测图片中无法确认的材质、工艺、功效、数据或品牌历史。`,
+        parts: [
+          ...productImages.map((img) => ({
+            inline_data: { mime_type: img.mimeType || "image/jpeg", data: img.base64 },
+          })),
+          { text: `产品事实：${JSON.stringify(productText)}` },
+        ],
+        maxTokens: 1200,
+        vision: true,
+      });
+      visualDirection = extractJson(visualText);
+    } catch (e) {
+      visualDirection = {};
+    }
+  }
+
   // 第二步：套框架生成文案
   const genText = await callDeepSeek(env, {
-    system: `你是资深电商详情页文案策划。请参考给定的竞品文案框架结构（仅结构，不是原文），结合我方产品信息，原创生成可以直接交给设计师排版的主图和详情页完整文案。输出严格按以下 JSON 格式，不要输出其他内容：
+    system: `你是资深品牌文案总监，不是商品信息改写器。请先统一品牌调性和核心意象，再参考竞品的结构方法（绝不照搬原文），为产品写出可以直接交给设计师排版的主图和详情页完整文案。
+
+输出严格按以下 JSON 格式，不要输出其他内容：
 {
+  "调性策略": {
+    "一句话定位": "",
+    "核心意象": [],
+    "语言质感": "",
+    "语言节奏": "",
+    "避免表达": []
+  },
   "主图文案候选": ["", "", ""],
   "详情页完整文案": [{"模块": "", "标题": "", "正文": "", "画面建议": ""}],
   "信息缺口提示": ""
 }
 要求：
-1. 主图文案每条不超过15字。
-2. 详情页按消费者浏览顺序输出6至10个模块，每个模块必须包含可直接使用的标题和正文，并给出简洁画面建议。
-3. 只能使用我方产品信息中明确提供的事实，不得编造功效、成分、检测数据、销量或认证。
-4. 如果信息不足，不要补造卖点，在"信息缺口提示"里明确说明还需要补充什么。`,
+1. 主图文案每条不超过15字，要有同一品牌气质，但角度不能重复；避免把材质、工艺、意象机械堆在一句里。
+2. 详情页按消费者浏览顺序输出6至10个模块。模块名是功能标签，标题必须是成品文案，两者不得重复；正文要有具体感受、场景或动作，不写空泛结论。
+3. 全篇只选择一组统一的核心意象并贯穿，不要在雪境、都市、精灵、宫廷等互不相关的意象之间跳跃。
+4. 禁止滥用“温暖纯粹、精致优雅、尽显奢华、匠心打造、品质之选、邂逅美好”等通用AI套话；除非能结合产品事实写出具体内容。
+5. 只能使用我方产品信息中明确提供的事实。不得编造模特身高体重尺码、成分比例、功效、检测数据、销量、认证、品牌历史或产地。
+6. 如果信息不足，不要补造卖点，在"信息缺口提示"里明确说明还需要补充什么。
+7. 句式要有长短变化和呼吸感，避免每段都是“名词+四字形容词”的同一模板。`,
     parts: [
-      ...productImages.map((img) => ({
-        inline_data: { mime_type: img.mimeType || "image/jpeg", data: img.base64 },
-      })),
       {
-        text: `【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品信息】\n${JSON.stringify(productText)}\n\n【我方产品图片】\n${productImages.length > 0 ? `已提供${productImages.length}张，请结合图片中可见的外观、包装、细节和使用场景，但不得臆测图片中无法确认的信息。` : "未提供"}\n\n【附加要求】\n${brief || "无"}`,
+        text: `【指定调性】\n${tone || "自动判断"}\n\n【产品视觉策略】\n${JSON.stringify(visualDirection)}\n\n【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品事实】\n${JSON.stringify(productText)}\n\n【补充要求】\n${brief || "无"}`,
       },
     ],
     maxTokens: 5000,
-    vision: productImages.length > 0,
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
   });
 
   let generated;
@@ -374,7 +412,22 @@ async function handleGenerate(request, env) {
     return json({ error: "生成结果解析失败", raw: genText }, 500);
   }
 
-  return json({ ok: true, generated, referencedCompetitors: finalSelected.map((c) => ({ id: c.id, brand: c.brand, productName: c.productName })) });
+  const referencedCompetitors = finalSelected.map((c) => ({ id: c.id, brand: c.brand, productName: c.productName }));
+  const generationRecord = {
+    id: uuid(),
+    type: "generation",
+    productId: product.id,
+    productName: product.productName || "",
+    category: product.category || "",
+    tone: tone || "自动判断",
+    brief: brief || "",
+    generated,
+    referencedCompetitors,
+    createdAt: new Date().toISOString(),
+  };
+  await env.LIBRARY_KV.put(`generation:${generationRecord.id}`, JSON.stringify(generationRecord));
+
+  return json({ ok: true, generated, referencedCompetitors, recordId: generationRecord.id });
 }
 
 // ---------- 主入口 ----------
