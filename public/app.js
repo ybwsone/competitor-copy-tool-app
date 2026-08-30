@@ -239,6 +239,25 @@ function renderCompetitorCard(r) {
         <div><b>风格定位：</b>${a.风格定位 || "-"}</div>
         <div><b>开头钩子类型：</b>${a.开头钩子类型 || "-"}</div>
         <div><b>痛点类型：</b>${(a.痛点类型 || []).join("、") || "-"}</div>
+        <div style="margin-top:8px"><b>主图部分：</b></div>
+        <ul style="margin:4px 0;padding-left:18px">
+          <li>核心钩子：${a.主图部分?.核心钩子 || "-"}</li>
+          <li>文案结构：${(a.主图部分?.文案结构 || []).join(" → ") || "-"}</li>
+          <li>视觉重点：${(a.主图部分?.视觉重点 || []).join("、") || "-"}</li>
+        </ul>
+        <div style="margin-top:8px"><b>详情页部分：</b></div>
+        <div>
+          ${(a.详情页部分 || [])
+            .map(
+              (m) => `<div class="module-item">
+                <div class="module-name">${m.模块 || "详情模块"}</div>
+                <div class="module-dir">作用：${m.作用 || "-"}</div>
+                <div class="module-dir">文案策略：${m.文案策略 || "-"}</div>
+                <div class="module-dir">画面内容：${m.画面内容 || "-"}</div>
+              </div>`
+            )
+            .join("") || "-"}
+        </div>
         <div style="margin-top:6px"><b>叙述结构：</b></div>
         <ul style="margin:4px 0;padding-left:18px">
           ${(a.叙述结构 || []).map((m) => `<li>${m.模块}：${m.作用}</li>`).join("") || "<li>-</li>"}
@@ -608,8 +627,13 @@ function genResultToText(data) {
   const g = data.generated;
   const lines = ["# 生成文案框架", "", "## 主图文案候选"];
   (g.主图文案候选 || []).forEach((t) => lines.push(`- ${t}`));
-  lines.push("", "## 详情页文案框架");
-  (g.详情页文案框架 || []).forEach((m) => lines.push(`- ${m.模块}：${m.文案方向}`));
+  lines.push("", "## 详情页完整文案");
+  (g.详情页完整文案 || []).forEach((m) => {
+    lines.push("", `### ${m.模块 || "详情模块"}`);
+    if (m.标题) lines.push(`标题：${m.标题}`);
+    if (m.正文) lines.push(`正文：${m.正文}`);
+    if (m.画面建议) lines.push(`画面建议：${m.画面建议}`);
+  });
   if (g.信息缺口提示) lines.push("", `信息缺口提示：${g.信息缺口提示}`);
   lines.push("", `参考框架来自：${(data.referencedCompetitors || []).map((c) => `${c.brand}·${c.productName}`).join("、")}`);
   return lines.join("\n");
@@ -622,10 +646,15 @@ function renderResult(data) {
   el.innerHTML = `
     <h3>主图文案候选</h3>
     <ul>${(g.主图文案候选 || []).map((t) => `<li>${t}</li>`).join("")}</ul>
-    <h3>详情页文案框架</h3>
-    ${(g.详情页文案框架 || [])
+    <h3>详情页完整文案</h3>
+    ${(g.详情页完整文案 || [])
       .map(
-        (m) => `<div class="module-item"><div class="module-name">${m.模块}</div><div class="module-dir">${m.文案方向}</div></div>`
+        (m) => `<div class="module-item">
+          <div class="module-name">${m.模块 || "详情模块"}</div>
+          <div class="module-dir"><strong>${m.标题 || ""}</strong></div>
+          <div class="module-dir">${m.正文 || ""}</div>
+          ${m.画面建议 ? `<div class="module-dir"><small>画面建议：${m.画面建议}</small></div>` : ""}
+        </div>`
       )
       .join("")}
     ${g.信息缺口提示 ? `<div class="gap-note">⚠ ${g.信息缺口提示}</div>` : ""}
