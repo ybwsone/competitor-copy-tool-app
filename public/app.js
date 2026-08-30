@@ -383,6 +383,35 @@ document.getElementById("passcode-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleLogin();
 });
 document.getElementById("comp-analyze-btn").addEventListener("click", handleAnalyzeCompetitor);
+
+// ---------- 批量导入 JSON（用于恢复历史数据，避免手动粘贴控制台出错）----------
+async function handleBulkImportFile() {
+  const fileInput = document.getElementById("bulk-import-file");
+  const statusEl = document.getElementById("bulk-import-status");
+  const file = fileInput.files[0];
+  if (!file) {
+    statusEl.textContent = "请先选择 JSON 文件";
+    statusEl.className = "status error-text";
+    return;
+  }
+  statusEl.textContent = "导入中...";
+  statusEl.className = "status";
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const data = await api("/api/bulk-import", {
+      method: "POST",
+      body: JSON.stringify(parsed),
+    });
+    statusEl.textContent = `导入成功，共 ${data.imported} 条`;
+    statusEl.className = "status success-text";
+    loadCompetitors();
+  } catch (e) {
+    statusEl.textContent = "导入失败：" + e.message;
+    statusEl.className = "status error-text";
+  }
+}
+document.getElementById("bulk-import-btn").addEventListener("click", handleBulkImportFile);
 document.getElementById("prod-save-btn").addEventListener("click", handleSaveProduct);
 document.getElementById("gen-btn").addEventListener("click", handleGenerate);
 document.getElementById("comp-export-btn").addEventListener("click", exportCompetitors);

@@ -48,6 +48,12 @@
           <input id="comp-images" type="file" accept="image/*" multiple />
           <button id="comp-analyze-btn">开始分析</button>
           <p id="comp-status" class="status"></p>
+          <div style="border-top:1px solid #eee;margin-top:16px;padding-top:12px">
+            <label>批量导入 JSON 文件（用于恢复历史分析数据）</label>
+            <input id="bulk-import-file" type="file" accept="application/json" />
+            <button id="bulk-import-btn" style="margin-top:8px">导入</button>
+            <p id="bulk-import-status" class="status"></p>
+          </div>
         </div>
         <div class="list-card">
           <div class="list-header">
