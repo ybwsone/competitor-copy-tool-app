@@ -181,6 +181,23 @@ async function handleDeleteItem(request, env) {
   return json({ ok: true });
 }
 
+async function handleBulkImport(request, env) {
+  const body = await request.json();
+  const { records } = body;
+  if (!records || !Array.isArray(records) || records.length === 0) {
+    return json({ error: "缺少 records 数组" }, 400);
+  }
+  let count = 0;
+  for (const r of records) {
+    const id = r.id || uuid();
+    const type = r.type === "product" ? "product" : "competitor";
+    const record = { ...r, id, type, createdAt: r.createdAt || new Date().toISOString() };
+    await env.LIBRARY_KV.put(`${type}:${id}`, JSON.stringify(record));
+    count++;
+  }
+  return json({ ok: true, imported: count });
+}
+
 async function handleGenerate(request, env) {
   const { productId, brief } = await request.json();
 
@@ -296,6 +313,9 @@ export default {
       }
       if (url.pathname === "/api/generate" && request.method === "POST") {
         return handleGenerate(request, env);
+      }
+      if (url.pathname === "/api/bulk-import" && request.method === "POST") {
+        return handleBulkImport(request, env);
       }
       return json({ error: "接口不存在" }, 404);
     }
