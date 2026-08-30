@@ -25,6 +25,7 @@
       <button class="tab-btn active" data-tab="competitor">竞品资源库</button>
       <button class="tab-btn" data-tab="product">我方产品库</button>
       <button class="tab-btn" data-tab="generate">一键生成</button>
+      <button class="tab-btn" data-tab="trash">回收站</button>
     </nav>
   </header>
 
@@ -45,12 +46,18 @@
           <label>提交人（可选）</label>
           <input id="comp-submitter" type="text" placeholder="你的名字，方便团队协作追溯" />
           <label>竞品图片（可多选，建议长图先分段截图）</label>
-          <input id="comp-images" type="file" accept="image/*" multiple />
+          <div id="comp-images-dropzone" class="dropzone">
+            <input id="comp-images" type="file" accept="image/*" multiple />
+            <div class="dropzone-hint">点击选择，或将图片拖拽到此处</div>
+          </div>
           <button id="comp-analyze-btn">开始分析</button>
           <p id="comp-status" class="status"></p>
           <div style="border-top:1px solid #eee;margin-top:16px;padding-top:12px">
             <label>批量导入 JSON 文件（用于恢复历史分析数据）</label>
-            <input id="bulk-import-file" type="file" accept="application/json" />
+            <div id="bulk-import-dropzone" class="dropzone">
+              <input id="bulk-import-file" type="file" accept="application/json" />
+              <div class="dropzone-hint">点击选择，或将 JSON 文件拖拽到此处</div>
+            </div>
             <button id="bulk-import-btn" style="margin-top:8px">导入</button>
             <p id="bulk-import-status" class="status"></p>
           </div>
@@ -113,6 +120,17 @@
         <p id="gen-status" class="status"></p>
       </div>
       <div id="gen-result" class="result-card hidden"></div>
+    </section>
+
+    <!-- 回收站 -->
+    <section id="tab-trash" class="tab-panel">
+      <div class="list-card">
+        <div class="list-header">
+          <h2>回收站 <span id="trash-count" class="count"></span></h2>
+        </div>
+        <p style="font-size:12px;color:#999;margin-top:-8px">删除的竞品和产品会先进这里，可以恢复或彻底删除</p>
+        <div id="trash-list" class="item-list"></div>
+      </div>
     </section>
   </main>
 </div>

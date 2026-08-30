@@ -17,10 +17,43 @@ async function api(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-  const data = await resp.json();
+  const text = await resp.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error(
+      resp.ok
+        ? "服务器返回了非预期格式的内容"
+        : `请求失败（状态码 ${resp.status}），如果是上传图片，可能是图片体积过大，建议先分段截图后再上传`
+    );
+  }
   if (!resp.ok) throw new Error(data.error || "请求失败");
   return data;
 }
+
+// ---------- 拖拽上传 ----------
+function attachDropzone(dropzoneEl, inputEl) {
+  ["dragenter", "dragover"].forEach((evt) =>
+    dropzoneEl.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzoneEl.classList.add("dragover");
+    })
+  );
+  ["dragleave", "drop"].forEach((evt) =>
+    dropzoneEl.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzoneEl.classList.remove("dragover");
+    })
+  );
+  dropzoneEl.addEventListener("drop", (e) => {
+    const dt = new DataTransfer();
+    Array.from(e.dataTransfer.files).forEach((f) => dt.items.add(f));
+    inputEl.files = dt.files;
+  });
+}
+attachDropzone(document.getElementById("comp-images-dropzone"), document.getElementById("comp-images"));
+attachDropzone(document.getElementById("bulk-import-dropzone"), document.getElementById("bulk-import-file"));
 
 // ---------- 登录 ----------
 async function handleLogin() {
@@ -61,14 +94,32 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.add("active");
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
     if (btn.dataset.tab === "generate") populateProductSelect();
+    if (btn.dataset.tab === "competitor") loadCompetitors();
+    if (btn.dataset.tab === "product") loadProducts();
+    if (btn.dataset.tab === "trash") loadTrash();
   });
 });
 
-// ---------- 竞品分析 ----------
-function fileToBase64(file) {
+// 上传前统一压缩：把最长边限制在 6000px 以内，转成 jpeg，避免超大截图导致请求失败
+// （淘宝详情页长图常有几万像素高，直接原图上传很容易超出请求体积限制或模型的图片尺寸限制）
+function resizeImageForAnalysis(file, maxDim = 6000, quality = 0.85) {
   return new Promise((resolve, reject) => {
+    const img = new Image();
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onload = () => {
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve({ base64: dataUrl.split(",")[1], mimeType: "image/jpeg" });
+      };
+      img.onerror = () => reject(new Error("图片解析失败，文件可能已损坏"));
+      img.src = reader.result;
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -118,9 +169,7 @@ async function handleAnalyzeCompetitor() {
 
   try {
     const fileList = Array.from(files).slice(0, 5);
-    const images = await Promise.all(
-      fileList.map(async (f) => ({ base64: await fileToBase64(f), mimeType: f.type }))
-    );
+    const images = await Promise.all(fileList.map((f) => resizeImageForAnalysis(f)));
     const thumbnail = await fileToThumbnail(fileList[0]);
     const data = await api("/api/analyze-competitor", {
       method: "POST",
@@ -447,14 +496,68 @@ async function saveProductEdit(id) {
 }
 window.saveProductEdit = saveProductEdit;
 
-// ---------- 删除 ----------
+// ---------- 删除 / 回收站 ----------
 async function deleteItem(type, id) {
-  if (!confirm("确认删除？")) return;
+  if (!confirm("移入回收站？之后可以在「回收站」页恢复。")) return;
   await api(`/api/item?type=${type}&id=${id}`, { method: "DELETE" });
   if (type === "competitor") loadCompetitors();
   else loadProducts();
 }
 window.deleteItem = deleteItem;
+
+async function loadTrash() {
+  try {
+    const [compData, prodData] = await Promise.all([
+      api("/api/library?type=competitor&deleted=true"),
+      api("/api/library?type=product&deleted=true"),
+    ]);
+    const all = [
+      ...compData.records.map((r) => ({ ...r, _type: "competitor" })),
+      ...prodData.records.map((r) => ({ ...r, _type: "product" })),
+    ].sort((a, b) => new Date(b.deletedAt || b.createdAt) - new Date(a.deletedAt || a.createdAt));
+    document.getElementById("trash-count").textContent = `(${all.length})`;
+    document.getElementById("trash-list").innerHTML = all
+      .map((r) => {
+        const title = r._type === "competitor" ? `${r.brand || "未知品牌"} · ${r.productName || "未命名"}` : r.productName;
+        return `
+        <div class="item-card">
+          <div class="item-title">${title}</div>
+          <div class="item-meta">${r._type === "competitor" ? "竞品" : "我方产品"} · 删除于 ${r.deletedAt ? new Date(r.deletedAt).toLocaleString() : "-"}</div>
+          <div class="result-actions" style="margin-top:8px">
+            <button onclick="restoreItem('${r._type}','${r.id}')">恢复</button>
+            <button class="del-btn" onclick="permanentDeleteItem('${r._type}','${r.id}')">彻底删除</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function restoreItem(type, id) {
+  try {
+    await api(`/api/item?type=${type}&id=${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ deleted: false }),
+    });
+    loadTrash();
+  } catch (e) {
+    alert("恢复失败：" + e.message);
+  }
+}
+window.restoreItem = restoreItem;
+
+async function permanentDeleteItem(type, id) {
+  if (!confirm("彻底删除后无法恢复，确定吗？")) return;
+  try {
+    await api(`/api/item?type=${type}&id=${id}&permanent=true`, { method: "DELETE" });
+    loadTrash();
+  } catch (e) {
+    alert("删除失败：" + e.message);
+  }
+}
+window.permanentDeleteItem = permanentDeleteItem;
 
 // ---------- 一键生成 ----------
 async function populateProductSelect() {

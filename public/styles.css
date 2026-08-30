@@ -103,6 +103,25 @@ main { padding: 24px 32px; }
 }
 .form-card button { margin-top: 16px; width: 100%; }
 
+.dropzone {
+  position: relative;
+  border: 1.5px dashed #ccc;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  background: #fafaf7;
+}
+.dropzone.dragover { border-color: #2c2c2a; background: #f1efe8; }
+.dropzone input[type="file"] {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.dropzone-hint { font-size: 11px; color: #999; margin-top: 6px; pointer-events: none; }
+
 .status { font-size: 12px; color: #888; margin-top: 10px; min-height: 16px; }
 .status.error-text { color: #c0392b; }
 .status.success-text { color: #1d9e75; }
