@@ -2,7 +2,8 @@
 // 功能：团队口令校验 / 竞品图片分析 / 产品资料存储 / 检索匹配 / 一键生成文案
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODEL = "gemini-3.7-flash";
+const MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
 const COMPETITOR_SCHEMA_PROMPT = `你是一位资深电商文案分析师。我会给你一张或多张竞品主图/详情页截图（同一款产品的不同部分），请你分析后严格按以下 JSON schema 输出，不要输出任何 schema 之外的文字，不要用 markdown 代码块包裹：
 
@@ -51,28 +52,47 @@ async function callGemini(env, { system, parts, maxTokens = 2000 }) {
     throw new Error("Cloudflare 尚未配置 GEMINI_API_KEY");
   }
 
-  const resp = await fetch(`${GEMINI_API_URL}/${MODEL}:generateContent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": env.GEMINI_API_KEY,
+  const requestBody = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    systemInstruction: system ? { parts: [{ text: system }] } : undefined,
+    generationConfig: {
+      maxOutputTokens: maxTokens,
+      responseMimeType: "application/json",
     },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts }],
-      systemInstruction: system ? { parts: [{ text: system }] } : undefined,
-      generationConfig: {
-        maxOutputTokens: maxTokens,
-        responseMimeType: "application/json",
-      },
-    }),
   });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Gemini API error ${resp.status}: ${text}`);
+
+  let lastError = "";
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const resp = await fetch(`${GEMINI_API_URL}/${model}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": env.GEMINI_API_KEY,
+        },
+        body: requestBody,
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        const responseParts = data.candidates?.[0]?.content?.parts || [];
+        return responseParts.map((p) => p.text || "").join("");
+      }
+
+      const text = await resp.text();
+      lastError = `${model} error ${resp.status}: ${text}`;
+      if (!RETRYABLE_STATUS.has(resp.status)) {
+        throw new Error(`Gemini API ${lastError}`);
+      }
+
+      if (attempt === 0) {
+        const delayMs = 800 + Math.floor(Math.random() * 400);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
-  const data = await resp.json();
-  const responseParts = data.candidates?.[0]?.content?.parts || [];
-  return responseParts.map((p) => p.text || "").join("");
+
+  throw new Error("Gemini 暂时繁忙，已自动重试并切换备用模型；最后一次错误：${lastError}`);
 }
 
 function extractJson(text) {
@@ -352,7 +372,7 @@ export default {
         }
         return json({ error: "接口不存在" }, 404);
       } catch (err) {
-        // 统一兜底：任何未预斝的报错都以 JSON 形式返回真实错误信息，
+        // 统一兜底：任何未预料的报错都以 JSON 形式返回真实错误信息，
         // 避免前端看到 Cloudflare 自己的 HTML/纯文本错误页导致"看不懂的500"
         return json({ error: `服务器处理出错：${err.message || String(err)}` }, 500);
       }
