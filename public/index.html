@@ -121,12 +121,29 @@
         <h2>一键生成文案</h2>
         <label>选择我方产品</label>
         <select id="gen-product-select"></select>
-        <label>附加要求（可选，例如风格偏好）</label>
-        <input id="gen-brief" type="text" placeholder="例如：偏向情感种草风格" />
+        <label>文案调性</label>
+        <select id="gen-tone">
+          <option value="自动判断">自动判断（结合产品图和竞品）</option>
+          <option value="高级克制">高级克制</option>
+          <option value="浪漫诗意">浪漫诗意</option>
+          <option value="东方叙事">东方叙事</option>
+          <option value="现代极简">现代极简</option>
+          <option value="轻奢女性">轻奢女性</option>
+          <option value="自然松弛">自然松弛</option>
+          <option value="专业功能">专业功能</option>
+        </select>
+        <label>补充要求（可选）</label>
+        <input id="gen-brief" type="text" placeholder="例如：避免甜美感，更冷静、更像精品画册" />
         <button id="gen-btn">生成主图与详情页文案</button>
         <p id="gen-status" class="status"></p>
       </div>
       <div id="gen-result" class="result-card hidden"></div>
+      <div class="list-card generation-history-card">
+        <div class="list-header">
+          <h2>生成记录 <span id="gen-history-count" class="count"></span></h2>
+        </div>
+        <div id="gen-history-list" class="item-list"></div>
+      </div>
     </section>
 
     <!-- 回收站 -->
