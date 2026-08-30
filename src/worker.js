@@ -181,6 +181,21 @@ async function handleDeleteItem(request, env) {
   return json({ ok: true });
 }
 
+async function handleUpdateItem(request, env) {
+  const url = new URL(request.url);
+  const type = url.searchParams.get("type");
+  const id = url.searchParams.get("id");
+  if (!type || !id) return json({ error: "缺少参数" }, 400);
+  const key = `${type}:${id}`;
+  const existingRaw = await env.LIBRARY_KV.get(key);
+  if (!existingRaw) return json({ error: "记录不存在" }, 404);
+  const existing = JSON.parse(existingRaw);
+  const updates = await request.json();
+  const updated = { ...existing, ...updates, id, type, updatedAt: new Date().toISOString() };
+  await env.LIBRARY_KV.put(key, JSON.stringify(updated));
+  return json({ ok: true, record: updated });
+}
+
 async function handleBulkImport(request, env) {
   const body = await request.json();
   const { records } = body;
@@ -310,6 +325,9 @@ export default {
       }
       if (url.pathname === "/api/item" && request.method === "DELETE") {
         return handleDeleteItem(request, env);
+      }
+      if (url.pathname === "/api/item" && request.method === "PUT") {
+        return handleUpdateItem(request, env);
       }
       if (url.pathname === "/api/generate" && request.method === "POST") {
         return handleGenerate(request, env);
