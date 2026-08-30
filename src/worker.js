@@ -197,7 +197,7 @@ async function handleAnalyzeCompetitor(request, env) {
 
 async function handleSaveProduct(request, env) {
   const body = await request.json();
-  const { productName, category, material, fit, craft, scene, sellingPoints, notes, submittedBy } = body;
+  const { productName, category, material, fit, craft, scene, sellingPoints, notes, submittedBy, images, thumbnail } = body;
   const id = uuid();
   const record = {
     id,
@@ -211,6 +211,8 @@ async function handleSaveProduct(request, env) {
     sellingPoints: sellingPoints || [],
     notes: notes || "",
     submittedBy: submittedBy || "",
+    images: Array.isArray(images) ? images.slice(0, 5) : [],
+    thumbnail: thumbnail || "",
     createdAt: new Date().toISOString(),
   };
   await env.LIBRARY_KV.put(`product:${id}`, JSON.stringify(record));
@@ -290,6 +292,8 @@ async function handleGenerate(request, env) {
   const productRaw = await env.LIBRARY_KV.get(`product:${productId}`);
   if (!productRaw) return json({ error: "产品未找到" }, 404);
   const product = JSON.parse(productRaw);
+  const productImages = Array.isArray(product.images) ? product.images.slice(0, 5) : [];
+  const { images: _images, thumbnail: _thumbnail, ...productText } = product;
 
   const compList = await env.LIBRARY_KV.list({ prefix: "competitor:" });
   const competitors = (
@@ -322,7 +326,7 @@ async function handleGenerate(request, env) {
     system: `你是文案框架检索助手。给你一份产品简介和一批竞品摘要，请按"文案框架参考价值"从高到低排序，返回最相关的最多5个竞品的 id 数组，格式：{"ids": ["id1","id2",...]}，只输出 JSON。`,
     parts: [
       {
-        text: `产品简介：${JSON.stringify(product)}\n\n附加说明：${brief || "无"}\n\n竞品摘要列表：${JSON.stringify(summaries)}`,
+        text: `产品简介：${JSON.stringify(productText)}\n\n附加说明：${brief || "无"}\n\n竞品摘要列表：${JSON.stringify(summaries)}`,
       },
     ],
     maxTokens: 500,
@@ -352,11 +356,15 @@ async function handleGenerate(request, env) {
 3. 只能使用我方产品信息中明确提供的事实，不得编造功效、成分、检测数据、销量或认证。
 4. 如果信息不足，不要补造卖点，在"信息缺口提示"里明确说明还需要补充什么。`,
     parts: [
+      ...productImages.map((img) => ({
+        inline_data: { mime_type: img.mimeType || "image/jpeg", data: img.base64 },
+      })),
       {
-        text: `【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品信息】\n${JSON.stringify(product)}\n\n【附加要求】\n${brief || "无"}`,
+        text: `【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品信息】\n${JSON.stringify(productText)}\n\n【我方产品图片】\n${productImages.length > 0 ? `已提供${productImages.length}张，请结合图片中可见的外观、包装、细节和使用场景，但不得臆测图片中无法确认的信息。` : "未提供"}\n\n【附加要求】\n${brief || "无"}`,
       },
     ],
     maxTokens: 5000,
+    vision: productImages.length > 0,
   });
 
   let generated;
