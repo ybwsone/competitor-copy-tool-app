@@ -77,6 +77,11 @@
       <div class="panel-grid">
         <div class="form-card">
           <h2>录入我方产品资料</h2>
+          <label>产品图片（最多5张）</label>
+          <div id="prod-image-dropzone" class="dropzone">
+            <input id="prod-images" type="file" accept="image/*" multiple />
+            <div class="dropzone-hint">点击选择，或将产品图拖拽到此处；建议包含主图、包装、细节和使用场景</div>
+          </div>
           <label>产品名</label>
           <input id="prod-name" type="text" placeholder="产品名称" />
           <label>品类</label>
