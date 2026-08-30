@@ -1,5 +1,7 @@
 const state = {
   passcode: localStorage.getItem("team_passcode") || "",
+  competitors: [],
+  products: [],
 };
 
 function authHeaders() {
@@ -133,36 +135,133 @@ async function handleAnalyzeCompetitor() {
   }
 }
 
+const uiState = { expanded: {}, editing: {} };
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 async function loadCompetitors() {
   try {
     const data = await api("/api/library?type=competitor");
-    const list = document.getElementById("comp-list");
-    document.getElementById("comp-count").textContent = `(${data.records.length})`;
     state.competitors = data.records;
-    list.innerHTML = data.records
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .map(
-        (r) => `
-      <div class="item-card">
-        <div class="item-card-body">
-          ${r.thumbnail ? `<img class="item-thumb" src="${r.thumbnail}" alt="竞品缩略图" />` : `<div class="item-thumb-placeholder"></div>`}
-          <div style="flex:1">
-            <div class="item-title">${r.brand || "未知品牌"} · ${r.productName || "未命名"}</div>
-            <div class="item-meta">${r.category || ""} · ${r.submittedBy ? "提交人：" + r.submittedBy + " · " : ""}${new Date(r.createdAt).toLocaleString()}</div>
-            <div>语气：${r.analysis?.语气风格 || "-"}</div>
-            <div class="item-tags">
-              ${(r.analysis?.卖点角度 || []).map((t) => `<span class="tag">${t}</span>`).join("")}
-            </div>
-          </div>
-        </div>
-        <button class="del-btn" onclick="deleteItem('competitor','${r.id}')">删除</button>
-      </div>`
-      )
-      .join("");
+    renderCompetitorList();
   } catch (e) {
     console.error(e);
   }
 }
+
+function renderCompetitorList() {
+  const list = document.getElementById("comp-list");
+  document.getElementById("comp-count").textContent = `(${state.competitors.length})`;
+  list.innerHTML = state.competitors
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map((r) => renderCompetitorCard(r))
+    .join("");
+}
+
+function renderCompetitorCard(r) {
+  const isEditing = uiState.editing.competitor === r.id;
+  const isExpanded = uiState.expanded.competitor === r.id;
+  const a = r.analysis || {};
+
+  if (isEditing) {
+    return `
+      <div class="item-card">
+        <label>品牌</label><input id="edit-comp-brand-${r.id}" value="${escapeHtml(r.brand)}" />
+        <label>产品名</label><input id="edit-comp-product-${r.id}" value="${escapeHtml(r.productName)}" />
+        <label>品类</label><input id="edit-comp-category-${r.id}" value="${escapeHtml(r.category)}" />
+        <label>分析结果（JSON，可直接改字段值）</label>
+        <textarea id="edit-comp-analysis-${r.id}" rows="14" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid #ddd;border-radius:6px">${escapeHtml(JSON.stringify(a, null, 2))}</textarea>
+        <div class="result-actions" style="margin-top:10px">
+          <button onclick="saveCompetitorEdit('${r.id}')">保存</button>
+          <button onclick="cancelEdit('competitor')" style="background:transparent;color:#666;border:1px solid #ddd">取消</button>
+        </div>
+      </div>`;
+  }
+
+  const detailHtml = isExpanded
+    ? `
+      <div style="margin-top:10px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:10px">
+        <div><b>风格定位：</b>${a.风格定位 || "-"}</div>
+        <div><b>开头钩子类型：</b>${a.开头钩子类型 || "-"}</div>
+        <div><b>痛点类型：</b>${(a.痛点类型 || []).join("、") || "-"}</div>
+        <div style="margin-top:6px"><b>叙述结构：</b></div>
+        <ul style="margin:4px 0;padding-left:18px">
+          ${(a.叙述结构 || []).map((m) => `<li>${m.模块}：${m.作用}</li>`).join("") || "<li>-</li>"}
+        </ul>
+        <div><b>图片展示顺序：</b>${(a.图片展示顺序 || []).join(" → ") || "-"}</div>
+        <div><b>信任背书方式：</b>${(a.信任背书方式 || []).join("、") || "-"}</div>
+        <div><b>促单话术类型：</b>${a.促单话术类型 || "-"}</div>
+        <div><b>文化叙事引用：</b>${a.文化叙事引用 || "-"}</div>
+        ${r.notes ? `<div><b>备注：</b>${r.notes}</div>` : ""}
+      </div>`
+    : "";
+
+  return `
+    <div class="item-card">
+      <div class="item-card-body" style="cursor:pointer" onclick="toggleExpand('competitor','${r.id}')">
+        ${r.thumbnail ? `<img class="item-thumb" src="${r.thumbnail}" alt="竞品缩略图" />` : `<div class="item-thumb-placeholder"></div>`}
+        <div style="flex:1">
+          <div class="item-title">${r.brand || "未知品牌"} · ${r.productName || "未命名"}</div>
+          <div class="item-meta">${r.category || ""} · ${r.submittedBy ? "提交人：" + r.submittedBy + " · " : ""}${new Date(r.createdAt).toLocaleString()}</div>
+          <div>语气：${a.语气风格 || "-"}</div>
+          <div class="item-tags">${(a.卖点角度 || []).map((t) => `<span class="tag">${t}</span>`).join("")}</div>
+        </div>
+      </div>
+      ${detailHtml}
+      <div class="result-actions" style="margin-top:8px">
+        <button onclick="toggleExpand('competitor','${r.id}')" class="ghost-btn">${isExpanded ? "收起" : "展开详情"}</button>
+        <button onclick="startEditCompetitor('${r.id}')" class="ghost-btn">编辑</button>
+        <button class="del-btn" onclick="deleteItem('competitor','${r.id}')">删除</button>
+      </div>
+    </div>`;
+}
+
+function toggleExpand(type, id) {
+  uiState.expanded[type] = uiState.expanded[type] === id ? null : id;
+  if (type === "competitor") renderCompetitorList();
+  else renderProductList();
+}
+window.toggleExpand = toggleExpand;
+
+function startEditCompetitor(id) {
+  uiState.editing.competitor = id;
+  renderCompetitorList();
+}
+window.startEditCompetitor = startEditCompetitor;
+
+function cancelEdit(type) {
+  uiState.editing[type] = null;
+  if (type === "competitor") renderCompetitorList();
+  else renderProductList();
+}
+window.cancelEdit = cancelEdit;
+
+async function saveCompetitorEdit(id) {
+  const brand = document.getElementById(`edit-comp-brand-${id}`).value.trim();
+  const productName = document.getElementById(`edit-comp-product-${id}`).value.trim();
+  const category = document.getElementById(`edit-comp-category-${id}`).value.trim();
+  const analysisText = document.getElementById(`edit-comp-analysis-${id}`).value;
+  let analysis;
+  try {
+    analysis = JSON.parse(analysisText);
+  } catch (e) {
+    alert("分析结果不是合法的 JSON，请检查格式后再保存");
+    return;
+  }
+  try {
+    await api(`/api/item?type=competitor&id=${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ brand, productName, category, analysis }),
+    });
+    uiState.editing.competitor = null;
+    loadCompetitors();
+  } catch (e) {
+    alert("保存失败：" + e.message);
+  }
+}
+window.saveCompetitorEdit = saveCompetitorEdit;
 
 // ---------- 导出资源库为 Markdown ----------
 function downloadMarkdown(filename, content) {
@@ -255,24 +354,98 @@ async function handleSaveProduct() {
 async function loadProducts() {
   try {
     const data = await api("/api/library?type=product");
-    const list = document.getElementById("prod-list");
-    document.getElementById("prod-count").textContent = `(${data.records.length})`;
-    list.innerHTML = data.records
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .map(
-        (r) => `
-      <div class="item-card">
-        <div class="item-title">${r.productName}</div>
-        <div class="item-meta">${r.category || ""} · ${r.submittedBy ? "提交人：" + r.submittedBy + " · " : ""}${new Date(r.createdAt).toLocaleString()}</div>
-        <div class="item-tags">${(r.sellingPoints || []).map((t) => `<span class="tag">${t}</span>`).join("")}</div>
-        <button class="del-btn" onclick="deleteItem('product','${r.id}')">删除</button>
-      </div>`
-      )
-      .join("");
+    state.products = data.records;
+    renderProductList();
   } catch (e) {
     console.error(e);
   }
 }
+
+function renderProductList() {
+  const list = document.getElementById("prod-list");
+  document.getElementById("prod-count").textContent = `(${state.products.length})`;
+  list.innerHTML = state.products
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map((r) => renderProductCard(r))
+    .join("");
+}
+
+function renderProductCard(r) {
+  const isEditing = uiState.editing.product === r.id;
+  const isExpanded = uiState.expanded.product === r.id;
+
+  if (isEditing) {
+    return `
+      <div class="item-card">
+        <label>产品名</label><input id="edit-prod-name-${r.id}" value="${escapeHtml(r.productName)}" />
+        <label>品类</label><input id="edit-prod-category-${r.id}" value="${escapeHtml(r.category)}" />
+        <label>面料/材质</label><input id="edit-prod-material-${r.id}" value="${escapeHtml(r.material)}" />
+        <label>版型特点</label><input id="edit-prod-fit-${r.id}" value="${escapeHtml(r.fit)}" />
+        <label>工艺细节</label><input id="edit-prod-craft-${r.id}" value="${escapeHtml(r.craft)}" />
+        <label>适合场景</label><input id="edit-prod-scene-${r.id}" value="${escapeHtml(r.scene)}" />
+        <label>核心卖点（逗号分隔）</label><input id="edit-prod-selling-${r.id}" value="${escapeHtml((r.sellingPoints || []).join("，"))}" />
+        <label>备注</label><input id="edit-prod-notes-${r.id}" value="${escapeHtml(r.notes)}" />
+        <div class="result-actions" style="margin-top:10px">
+          <button onclick="saveProductEdit('${r.id}')">保存</button>
+          <button onclick="cancelEdit('product')" style="background:transparent;color:#666;border:1px solid #ddd">取消</button>
+        </div>
+      </div>`;
+  }
+
+  const detailHtml = isExpanded
+    ? `
+      <div style="margin-top:10px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:10px">
+        <div><b>面料/材质：</b>${r.material || "-"}</div>
+        <div><b>版型特点：</b>${r.fit || "-"}</div>
+        <div><b>工艺细节：</b>${r.craft || "-"}</div>
+        <div><b>适合场景：</b>${r.scene || "-"}</div>
+        ${r.notes ? `<div><b>备注：</b>${r.notes}</div>` : ""}
+      </div>`
+    : "";
+
+  return `
+    <div class="item-card">
+      <div style="cursor:pointer" onclick="toggleExpand('product','${r.id}')">
+        <div class="item-title">${r.productName}</div>
+        <div class="item-meta">${r.category || ""} · ${r.submittedBy ? "提交人：" + r.submittedBy + " · " : ""}${new Date(r.createdAt).toLocaleString()}</div>
+        <div class="item-tags">${(r.sellingPoints || []).map((t) => `<span class="tag">${t}</span>`).join("")}</div>
+      </div>
+      ${detailHtml}
+      <div class="result-actions" style="margin-top:8px">
+        <button onclick="toggleExpand('product','${r.id}')" class="ghost-btn">${isExpanded ? "收起" : "展开详情"}</button>
+        <button onclick="startEditProduct('${r.id}')" class="ghost-btn">编辑</button>
+        <button class="del-btn" onclick="deleteItem('product','${r.id}')">删除</button>
+      </div>
+    </div>`;
+}
+
+function startEditProduct(id) {
+  uiState.editing.product = id;
+  renderProductList();
+}
+window.startEditProduct = startEditProduct;
+
+async function saveProductEdit(id) {
+  const productName = document.getElementById(`edit-prod-name-${id}`).value.trim();
+  const category = document.getElementById(`edit-prod-category-${id}`).value.trim();
+  const material = document.getElementById(`edit-prod-material-${id}`).value.trim();
+  const fit = document.getElementById(`edit-prod-fit-${id}`).value.trim();
+  const craft = document.getElementById(`edit-prod-craft-${id}`).value.trim();
+  const scene = document.getElementById(`edit-prod-scene-${id}`).value.trim();
+  const sellingPoints = document.getElementById(`edit-prod-selling-${id}`).value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  const notes = document.getElementById(`edit-prod-notes-${id}`).value.trim();
+  try {
+    await api(`/api/item?type=product&id=${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ productName, category, material, fit, craft, scene, sellingPoints, notes }),
+    });
+    uiState.editing.product = null;
+    loadProducts();
+  } catch (e) {
+    alert("保存失败：" + e.message);
+  }
+}
+window.saveProductEdit = saveProductEdit;
 
 // ---------- 删除 ----------
 async function deleteItem(type, id) {
