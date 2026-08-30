@@ -163,12 +163,16 @@ async function handleAnalyzeCompetitor() {
     statusEl.className = "status error-text";
     return;
   }
+  if (files.length > 3) {
+    statusEl.textContent = `你选了 ${files.length} 张，单次最多分析 3 张，将只使用前 3 张（其余可以再分批上传）`;
+    statusEl.className = "status";
+  }
 
   statusEl.textContent = "分析中，可能需要 10-30 秒...";
   statusEl.className = "status";
 
   try {
-    const fileList = Array.from(files).slice(0, 5);
+    const fileList = Array.from(files).slice(0, 3);
     const images = await Promise.all(fileList.map((f) => resizeImageForAnalysis(f)));
     const thumbnail = await fileToThumbnail(fileList[0]);
     const data = await api("/api/analyze-competitor", {
