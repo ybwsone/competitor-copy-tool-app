@@ -47,11 +47,10 @@ function checkPasscode(request, env) {
 }
 
 async function callGemini(env, { system, parts, maxTokens = 2000 }) {
-  const resp = await fetch(`${GEMINI_API_URL}/${MODEL}:generateContent`, {
+  const resp = await fetch(`${GEMINI_API_URL}/${MODEL}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": env.GEMINI_API_KEY,
     },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
