@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>竞品文案分析工具</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<div id="login-screen" class="screen">
+  <div class="login-box">
+    <h1>竞品文案分析工具</h1>
+    <p class="hint">团队内部工具，请输入访问口令</p>
+    <input id="passcode-input" type="password" placeholder="访问口令" />
+    <button id="login-btn">进入</button>
+    <p id="login-error" class="error"></p>
+  </div>
+</div>
+
+<div id="main-screen" class="screen hidden">
+  <header>
+    <h1>竞品文案分析工具</h1>
+    <nav>
+      <button class="tab-btn active" data-tab="competitor">竞品资源库</button>
+      <button class="tab-btn" data-tab="product">我方产品库</button>
+      <button class="tab-btn" data-tab="generate">一键生成</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 竞品资源库 -->
+    <section id="tab-competitor" class="tab-panel active">
+      <div class="panel-grid">
+        <div class="form-card">
+          <h2>上传竞品图片分析</h2>
+          <label>品牌名</label>
+          <input id="comp-brand" type="text" placeholder="例如：致知ZHIZHI" />
+          <label>产品名</label>
+          <input id="comp-product" type="text" placeholder="例如：秋玉引针织开衫" />
+          <label>品类</label>
+          <input id="comp-category" type="text" placeholder="例如：针织开衫 / 香氛" />
+          <label>备注（可选）</label>
+          <input id="comp-notes" type="text" placeholder="任何补充说明" />
+          <label>提交人（可选）</label>
+          <input id="comp-submitter" type="text" placeholder="你的名字，方便团队协作追溯" />
+          <label>竞品图片（可多选，建议长图先分段截图）</label>
+          <input id="comp-images" type="file" accept="image/*" multiple />
+          <button id="comp-analyze-btn">开始分析</button>
+          <p id="comp-status" class="status"></p>
+        </div>
+        <div class="list-card">
+          <div class="list-header">
+            <h2>已分析竞品 <span id="comp-count" class="count"></span></h2>
+            <button id="comp-export-btn" class="ghost-btn">导出为 Markdown</button>
+          </div>
+          <div id="comp-list" class="item-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 我方产品库 -->
+    <section id="tab-product" class="tab-panel">
+      <div class="panel-grid">
+        <div class="form-card">
+          <h2>录入我方产品资料</h2>
+          <label>产品名</label>
+          <input id="prod-name" type="text" placeholder="产品名称" />
+          <label>品类</label>
+          <input id="prod-category" type="text" placeholder="例如：针织开衫" />
+          <label>面料/材质</label>
+          <input id="prod-material" type="text" placeholder="例如：95%美利奴羊毛" />
+          <label>版型特点</label>
+          <input id="prod-fit" type="text" placeholder="例如：落肩小宽松" />
+          <label>工艺细节</label>
+          <input id="prod-craft" type="text" placeholder="例如：定制五金扣" />
+          <label>适合场景</label>
+          <input id="prod-scene" type="text" placeholder="例如：通勤/日常" />
+          <label>核心卖点（逗号分隔）</label>
+          <input id="prod-selling" type="text" placeholder="卖点1，卖点2，卖点3" />
+          <label>备注（可选）</label>
+          <input id="prod-notes" type="text" placeholder="任何补充说明" />
+          <label>提交人（可选）</label>
+          <input id="prod-submitter" type="text" placeholder="你的名字，方便团队协作追溯" />
+          <button id="prod-save-btn">保存产品</button>
+          <p id="prod-status" class="status"></p>
+        </div>
+        <div class="list-card">
+          <div class="list-header">
+            <h2>已录入产品 <span id="prod-count" class="count"></span></h2>
+            <button id="prod-export-btn" class="ghost-btn">导出为 Markdown</button>
+          </div>
+          <div id="prod-list" class="item-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 一键生成 -->
+    <section id="tab-generate" class="tab-panel">
+      <div class="form-card wide">
+        <h2>一键生成文案</h2>
+        <label>选择我方产品</label>
+        <select id="gen-product-select"></select>
+        <label>附加要求（可选，例如风格偏好）</label>
+        <input id="gen-brief" type="text" placeholder="例如：偏向情感种草风格" />
+        <button id="gen-btn">生成文案框架</button>
+        <p id="gen-status" class="status"></p>
+      </div>
+      <div id="gen-result" class="result-card hidden"></div>
+    </section>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
