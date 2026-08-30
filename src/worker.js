@@ -1,8 +1,9 @@
 // ===================== 竞品文案分析工具 - Cloudflare Worker 后端 =====================
 // 功能：团队口令校验 / 竞品图片分析 / 产品资料存储 / 检索匹配 / 一键生成文案
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+const DEEPSEEK_VISION_MODELS = ["deepseek-v4-flash-vision-exp"];
+const DEEPSEEK_TEXT_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"];
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
 const COMPETITOR_SCHEMA_PROMPT = `你是一位资深电商文案分析师。我会给你一张或多张竞品主图/详情页截图（同一款产品的不同部分），请你分析后严格按以下 JSON schema 输出，不要输出任何 schema 之外的文字，不要用 markdown 代码块包裹：
@@ -18,14 +19,24 @@ const COMPETITOR_SCHEMA_PROMPT = `你是一位资深电商文案分析师。我�
   "语气风格": "",
   "信任背书方式": [],
   "促单话术类型": "",
-  "文化叙事引用": ""
+  "文化叙事引用": "",
+  "主图部分": {
+    "核心钩子": "",
+    "文案结构": [],
+    "视觉重点": []
+  },
+  "详情页部分": [
+    {"模块": "", "作用": "", "文案策略": "", "画面内容": ""}
+  ]
 }
 
 要求：
 1. 只分析文案的结构、角度、语气、逻辑，绝对不要逐字复述原文文案内容
 2. 如果某字段无法判断，填空字符串或空数组，不要编造
 3. "叙述结构"按图片从上到下的模块顺序描述
-4. 只输出 JSON，不要有任何前后缀说明文字`;
+4. "主图部分"总结首屏/主图的钩子、文案层级和视觉重点
+5. "详情页部分"必须按消费者从上到下的浏览顺序拆分模块；只分析结构和策略，不复述原文
+6. 只输出 JSON，不要有任何前后缀说明文字`;
 
 function corsHeaders() {
   return {
@@ -47,42 +58,58 @@ function checkPasscode(request, env) {
   return provided && provided === env.TEAM_PASSCODE;
 }
 
-async function callGemini(env, { system, parts, maxTokens = 2000 }) {
-  if (!env.GEMINI_API_KEY) {
-    throw new Error("Cloudflare 尚未配置 GEMINI_API_KEY");
+async function callDeepSeek(env, { system, parts, maxTokens = 2000, vision = false }) {
+  if (!env.DEEPSEEK_API_KEY) {
+    throw new Error("Cloudflare 尚未配置 DEEPSEEK_API_KEY");
   }
 
-  const requestBody = JSON.stringify({
-    contents: [{ role: "user", parts }],
-    systemInstruction: system ? { parts: [{ text: system }] } : undefined,
-    generationConfig: {
-      maxOutputTokens: maxTokens,
-      responseMimeType: "application/json",
-    },
+  const content = parts.map((part) => {
+    if (part.inline_data) {
+      return {
+        type: "image_url",
+        image_url: {
+          url: `data:${part.inline_data.mime_type};base64,${part.inline_data.data}`,
+        },
+      };
+    }
+    return { type: "text", text: part.text || "" };
   });
+  const models = vision ? DEEPSEEK_VISION_MODELS : DEEPSEEK_TEXT_MODELS;
 
   let lastError = "";
-  for (const model of MODELS) {
+  for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const resp = await fetch(`${GEMINI_API_URL}/${model}:generateContent`, {
+      const resp = await fetch(DEEPSEEK_API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": env.GEMINI_API_KEY,
+          Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
         },
-        body: requestBody,
+        body: JSON.stringify({
+          model,
+          messages: [
+            ...(system ? [{ role: "system", content: system }] : []),
+            { role: "user", content },
+          ],
+          response_format: { type: "json_object" },
+          thinking: { type: "disabled" },
+          max_tokens: maxTokens,
+          temperature: 0.2,
+        }),
       });
 
       if (resp.ok) {
         const data = await resp.json();
-        const responseParts = data.candidates?.[0]?.content?.parts || [];
-        return responseParts.map((p) => p.text || "").join("");
-      }
-
-      const text = await resp.text();
-      lastError = `${model} error ${resp.status}: ${text}`;
-      if (!RETRYABLE_STATUS.has(resp.status)) {
-        throw new Error(`Gemini API ${lastError}`);
+        const output = data.choices?.[0]?.message?.content?.trim() || "";
+        const finishReason = data.choices?.[0]?.finish_reason || "";
+        if (output && finishReason !== "length") return output;
+        lastError = `${model} 返回空内容或输出被截断（finish_reason=${finishReason || "unknown"}）`;
+      } else {
+        const text = await resp.text();
+        lastError = `${model} error ${resp.status}: ${text}`;
+        if (!RETRYABLE_STATUS.has(resp.status)) {
+          throw new Error(`DeepSeek API ${lastError}`);
+        }
       }
 
       if (attempt === 0) {
@@ -92,12 +119,19 @@ async function callGemini(env, { system, parts, maxTokens = 2000 }) {
     }
   }
 
-  throw new Error("Gemini 暂时繁忙，已自动重试并切换备用模型；最后一次错误：" + lastError);
+  throw new Error("DeepSeek 暂时无法完成请求，已自动重试；最后一次错误：" + lastError);
 }
 
 function extractJson(text) {
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-  return JSON.parse(cleaned);
+  const cleaned = String(text || "").replace(/```json/gi, "").replace(/```/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstError) {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    throw firstError;
+  }
 }
 
 function uuid() {
@@ -130,10 +164,11 @@ async function handleAnalyzeCompetitor(request, env) {
     text: `品牌：${brand || "未填写"}；产品名：${productName || "未填写"}；品类：${category || "未填写"}；备注：${notes || "无"}`,
   });
 
-  const resultText = await callGemini(env, {
+  const resultText = await callDeepSeek(env, {
     system: COMPETITOR_SCHEMA_PROMPT,
     parts,
-    maxTokens: 1500,
+    maxTokens: 3000,
+    vision: true,
   });
 
   let analysis;
@@ -270,7 +305,7 @@ async function handleGenerate(request, env) {
     return json({ error: "资源库里还没有竞品分析数据，请先上传竞品图片" }, 400);
   }
 
-  // 第一步：用 Gemini 做语义相关性排序，代替向量检索
+  // 第一步：用 DeepSeek 做语义相关性排序，代替向量检索
   const summaries = competitors.map((c) => ({
     id: c.id,
     brand: c.brand,
@@ -283,7 +318,7 @@ async function handleGenerate(request, env) {
     },
   }));
 
-  const rankText = await callGemini(env, {
+  const rankText = await callDeepSeek(env, {
     system: `你是文案框架检索助手。给你一份产品简介和一批竞品摘要，请按"文案框架参考价值"从高到低排序，返回最相关的最多5个竞品的 id 数组，格式：{"ids": ["id1","id2",...]}，只输出 JSON。`,
     parts: [
       {
@@ -304,20 +339,24 @@ async function handleGenerate(request, env) {
   const finalSelected = selected.length > 0 ? selected : competitors.slice(0, 3);
 
   // 第二步：套框架生成文案
-  const genText = await callGemini(env, {
-    system: `你是电商文案策划。请参考给定的竞品文案框架结构（仅结构，不是原文），结合我方产品信息，原创生成文案。输出严格按以下 JSON 格式，不要输出其他内容：
+  const genText = await callDeepSeek(env, {
+    system: `你是资深电商详情页文案策划。请参考给定的竞品文案框架结构（仅结构，不是原文），结合我方产品信息，原创生成可以直接交给设计师排版的主图和详情页完整文案。输出严格按以下 JSON 格式，不要输出其他内容：
 {
   "主图文案候选": ["", "", ""],
-  "详情页文案框架": [{"模块": "", "文案方向": ""}],
+  "详情页完整文案": [{"模块": "", "标题": "", "正文": "", "画面建议": ""}],
   "信息缺口提示": ""
 }
-主图文案每条不超过15字。详情页文案框架给方向和大纲，不用写成品文案。如果我方产品信息中缺少某个竞品常用的卖点角度，在"信息缺口提示"里说明。`,
+要求：
+1. 主图文案每条不超过15字。
+2. 详情页按消费者浏览顺序输出6至10个模块，每个模块必须包含可直接使用的标题和正文，并给出简洁画面建议。
+3. 只能使用我方产品信息中明确提供的事实，不得编造功效、成分、检测数据、销量或认证。
+4. 如果信息不足，不要补造卖点，在"信息缺口提示"里明确说明还需要补充什么。`,
     parts: [
       {
         text: `【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品信息】\n${JSON.stringify(product)}\n\n【附加要求】\n${brief || "无"}`,
       },
     ],
-    maxTokens: 2000,
+    maxTokens: 5000,
   });
 
   let generated;
