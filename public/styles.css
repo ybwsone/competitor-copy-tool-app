@@ -160,4 +160,8 @@ main { padding: 24px 32px; }
 .result-card .module-name { font-weight: 600; font-size: 13px; }
 .result-card .module-dir { font-size: 13px; color: #555; }
 .result-card .gap-note { background: #fff8e6; border: 1px solid #f0d99a; padding: 10px; border-radius: 8px; font-size: 12px; margin-top: 12px; }
+.result-card .tone-strategy { background: #f7f6f2; border: 1px solid #e8e5dc; padding: 12px; border-radius: 8px; color: #555; font-size: 12px; line-height: 1.7; }
 .result-card .ref-list { font-size: 12px; color: #999; margin-top: 16px; }
+.generation-history-card { margin-top: 20px; max-width: 700px; }
+.generation-preview { margin: 7px 0; color: #444; font-size: 13px; }
+.empty-history { padding: 18px 0; color: #999; font-size: 12px; text-align: center; }
