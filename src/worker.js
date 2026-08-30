@@ -92,7 +92,7 @@ async function callGemini(env, { system, parts, maxTokens = 2000 }) {
     }
   }
 
-  throw new Error("Gemini 暂时繁忙，已自动重试并切换备用模型；最后一次错误：${lastError}`);
+  throw new Error("Gemini 暂时繁忙，已自动重试并切换备用模型；最后一次错误：" + lastError);
 }
 
 function extractJson(text) {
