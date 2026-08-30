@@ -50,6 +50,7 @@ function attachDropzone(dropzoneEl, inputEl) {
     const dt = new DataTransfer();
     Array.from(e.dataTransfer.files).forEach((f) => dt.items.add(f));
     inputEl.files = dt.files;
+    inputEl.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
 attachDropzone(document.getElementById("comp-images-dropzone"), document.getElementById("comp-images"));
@@ -147,6 +148,31 @@ function fileToThumbnail(file, maxWidth = 240) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+let productPreviewUrls = [];
+
+function renderProductImagePreview() {
+  const input = document.getElementById("prod-images");
+  const preview = document.getElementById("prod-image-preview");
+  const status = document.getElementById("prod-image-status");
+  const allFiles = Array.from(input.files || []).filter((file) => file.type.startsWith("image/"));
+  const files = allFiles.slice(0, 5);
+
+  productPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+  productPreviewUrls = files.map((file) => URL.createObjectURL(file));
+
+  preview.innerHTML = productPreviewUrls
+    .map((url, index) => `<div class="image-preview-item"><img src="${url}" alt="待上传产品图${index + 1}" /><span>${index + 1}</span></div>`)
+    .join("");
+
+  if (files.length === 0) {
+    status.textContent = "";
+  } else if (allFiles.length > 5) {
+    status.textContent = `已选择 ${allFiles.length} 张，将使用前 5 张；填写资料后点击“保存产品”即可上传。`;
+  } else {
+    status.textContent = `已选择 ${files.length} 张；填写资料后点击“保存产品”即可上传。`;
+  }
 }
 
 async function handleAnalyzeCompetitor() {
@@ -428,6 +454,7 @@ async function handleSaveProduct() {
     statusEl.textContent = "保存成功";
     statusEl.className = "status success-text";
     document.getElementById("prod-images").value = "";
+    renderProductImagePreview();
     loadProducts();
   } catch (e) {
     statusEl.textContent = "保存失败：" + e.message;
@@ -711,6 +738,7 @@ document.getElementById("passcode-input").addEventListener("keydown", (e) => {
 });
 document.getElementById("comp-analyze-btn").addEventListener("click", handleAnalyzeCompetitor);
 attachDropzone(document.getElementById("prod-image-dropzone"), document.getElementById("prod-images"));
+document.getElementById("prod-images").addEventListener("change", renderProductImagePreview);
 
 // ---------- 批量导入 JSON（用于恢复历史数据，避免手动粘贴控制台出错）----------
 async function handleBulkImportFile() {
