@@ -162,6 +162,7 @@ async function handleSaveProduct(request, env) {
 async function handleListLibrary(request, env) {
   const url = new URL(request.url);
   const type = url.searchParams.get("type") || "competitor";
+  const wantDeleted = url.searchParams.get("deleted") === "true";
   const list = await env.LIBRARY_KV.list({ prefix: `${type}:` });
   const records = await Promise.all(
     list.keys.map(async (k) => {
@@ -169,16 +170,28 @@ async function handleListLibrary(request, env) {
       return val ? JSON.parse(val) : null;
     })
   );
-  return json({ ok: true, records: records.filter(Boolean) });
+  const filtered = records.filter(Boolean).filter((r) => Boolean(r.deleted) === wantDeleted);
+  return json({ ok: true, records: filtered });
 }
 
 async function handleDeleteItem(request, env) {
   const url = new URL(request.url);
   const type = url.searchParams.get("type");
   const id = url.searchParams.get("id");
+  const permanent = url.searchParams.get("permanent") === "true";
   if (!type || !id) return json({ error: "缺少参数" }, 400);
-  await env.LIBRARY_KV.delete(`${type}:${id}`);
-  return json({ ok: true });
+  const key = `${type}:${id}`;
+  if (permanent) {
+    await env.LIBRARY_KV.delete(key);
+    return json({ ok: true, permanent: true });
+  }
+  const existingRaw = await env.LIBRARY_KV.get(key);
+  if (!existingRaw) return json({ error: "记录不存在" }, 404);
+  const existing = JSON.parse(existingRaw);
+  existing.deleted = true;
+  existing.deletedAt = new Date().toISOString();
+  await env.LIBRARY_KV.put(key, JSON.stringify(existing));
+  return json({ ok: true, permanent: false });
 }
 
 async function handleUpdateItem(request, env) {
@@ -228,7 +241,7 @@ async function handleGenerate(request, env) {
         return v ? JSON.parse(v) : null;
       })
     )
-  ).filter(Boolean);
+  ).filter((c) => c && !c.deleted);
 
   if (competitors.length === 0) {
     return json({ error: "资源库里还没有竞品分析数据，请先上传竞品图片" }, 400);
