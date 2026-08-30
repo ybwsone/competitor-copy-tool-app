@@ -143,6 +143,8 @@ main { padding: 24px 32px; }
 .item-card-body { display: flex; gap: 10px; }
 .item-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #f1efe8; }
 .item-thumb-placeholder { width: 56px; height: 56px; border-radius: 6px; flex-shrink: 0; background: #f1efe8; }
+.product-image-gallery { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+.product-image-gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #f1efe8; }
 .result-actions { display: flex; gap: 8px; margin-top: 16px; }
 .result-actions button { flex: none; }
 
