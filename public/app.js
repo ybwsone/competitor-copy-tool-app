@@ -2,6 +2,7 @@ const state = {
   passcode: localStorage.getItem("team_passcode") || "",
   competitors: [],
   products: [],
+  generations: [],
 };
 
 function authHeaders() {
@@ -94,7 +95,10 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
-    if (btn.dataset.tab === "generate") populateProductSelect();
+    if (btn.dataset.tab === "generate") {
+      populateProductSelect();
+      loadGenerationHistory();
+    }
     if (btn.dataset.tab === "competitor") loadCompetitors();
     if (btn.dataset.tab === "product") loadProducts();
     if (btn.dataset.tab === "trash") loadTrash();
@@ -638,6 +642,7 @@ async function populateProductSelect() {
 
 async function handleGenerate() {
   const productId = document.getElementById("gen-product-select").value;
+  const tone = document.getElementById("gen-tone").value;
   const brief = document.getElementById("gen-brief").value.trim();
   const statusEl = document.getElementById("gen-status");
   const resultEl = document.getElementById("gen-result");
@@ -648,18 +653,19 @@ async function handleGenerate() {
     return;
   }
 
-  statusEl.textContent = "生成中，可能需要 10-20 秒...";
+  statusEl.textContent = "正在分析视觉调性并生成文案，可能需要 20-60 秒...";
   statusEl.className = "status";
   resultEl.classList.add("hidden");
 
   try {
     const data = await api("/api/generate", {
       method: "POST",
-      body: JSON.stringify({ productId, brief }),
+      body: JSON.stringify({ productId, tone, brief }),
     });
     statusEl.textContent = "生成完成";
     statusEl.className = "status success-text";
     renderResult(data);
+    loadGenerationHistory();
   } catch (e) {
     statusEl.textContent = "生成失败：" + e.message;
     statusEl.className = "status error-text";
@@ -670,7 +676,15 @@ let lastGenData = null;
 
 function genResultToText(data) {
   const g = data.generated;
-  const lines = ["# 生成文案框架", "", "## 主图文案候选"];
+  const lines = ["# 生成文案框架"];
+  if (g.调性策略) {
+    lines.push("", "## 本次调性策略");
+    lines.push(`- 一句话定位：${g.调性策略.一句话定位 || "-"}`);
+    lines.push(`- 核心意象：${(g.调性策略.核心意象 || []).join("、") || "-"}`);
+    lines.push(`- 语言质感：${g.调性策略.语言质感 || "-"}`);
+    lines.push(`- 语言节奏：${g.调性策略.语言节奏 || "-"}`);
+  }
+  lines.push("", "## 主图文案候选");
   (g.主图文案候选 || []).forEach((t) => lines.push(`- ${t}`));
   lines.push("", "## 详情页完整文案");
   (g.详情页完整文案 || []).forEach((m) => {
@@ -689,6 +703,13 @@ function renderResult(data) {
   const el = document.getElementById("gen-result");
   const g = data.generated;
   el.innerHTML = `
+    ${g.调性策略 ? `<h3>本次调性策略</h3>
+      <div class="tone-strategy">
+        <div><strong>${g.调性策略.一句话定位 || ""}</strong></div>
+        <div>核心意象：${(g.调性策略.核心意象 || []).join("、") || "-"}</div>
+        <div>语言质感：${g.调性策略.语言质感 || "-"}</div>
+        <div>语言节奏：${g.调性策略.语言节奏 || "-"}</div>
+      </div>` : ""}
     <h3>主图文案候选</h3>
     <ul>${(g.主图文案候选 || []).map((t) => `<li>${t}</li>`).join("")}</ul>
     <h3>详情页完整文案</h3>
@@ -711,6 +732,71 @@ function renderResult(data) {
   `;
   el.classList.remove("hidden");
 }
+
+async function loadGenerationHistory() {
+  const list = document.getElementById("gen-history-list");
+  if (!list) return;
+  try {
+    const data = await api("/api/library?type=generation");
+    state.generations = (data.records || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    document.getElementById("gen-history-count").textContent = `(${state.generations.length})`;
+    list.innerHTML = state.generations.length
+      ? state.generations.map((record) => {
+          const candidates = record.generated?.主图文案候选 || [];
+          return `<div class="item-card generation-record">
+            <div class="item-title">${escapeHtml(record.productName || "未命名产品")}</div>
+            <div class="item-meta">${escapeHtml(record.tone || "自动判断")} · ${new Date(record.createdAt).toLocaleString()}</div>
+            <div class="generation-preview">${escapeHtml(candidates[0] || record.generated?.调性策略?.一句话定位 || "已生成详情页文案")}</div>
+            <div class="item-meta">参考：${escapeHtml((record.referencedCompetitors || []).map((c) => `${c.brand || ""}·${c.productName || ""}`).join("、") || "无")}</div>
+            <div class="result-actions" style="margin-top:8px">
+              <button class="ghost-btn" onclick="viewGenerationRecord('${record.id}')">查看</button>
+              <button class="ghost-btn" onclick="copyGenerationRecord('${record.id}')">复制</button>
+              <button class="del-btn" onclick="deleteGenerationRecord('${record.id}')">删除</button>
+            </div>
+          </div>`;
+        }).join("")
+      : `<div class="empty-history">还没有生成记录</div>`;
+  } catch (e) {
+    list.innerHTML = `<div class="empty-history">生成记录加载失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function findGenerationRecord(id) {
+  return state.generations.find((record) => record.id === id);
+}
+
+function viewGenerationRecord(id) {
+  const record = findGenerationRecord(id);
+  if (!record) return;
+  renderResult({ generated: record.generated, referencedCompetitors: record.referencedCompetitors || [] });
+  document.getElementById("gen-result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+window.viewGenerationRecord = viewGenerationRecord;
+
+async function copyGenerationRecord(id) {
+  const record = findGenerationRecord(id);
+  if (!record) return;
+  try {
+    await navigator.clipboard.writeText(genResultToText({ generated: record.generated, referencedCompetitors: record.referencedCompetitors || [] }));
+    document.getElementById("gen-status").textContent = "历史文案已复制到剪贴板";
+    document.getElementById("gen-status").className = "status success-text";
+  } catch (e) {
+    document.getElementById("gen-status").textContent = "复制失败，请点击查看后手动复制";
+    document.getElementById("gen-status").className = "status error-text";
+  }
+}
+window.copyGenerationRecord = copyGenerationRecord;
+
+async function deleteGenerationRecord(id) {
+  if (!confirm("确定删除这条生成记录？删除后无法恢复。")) return;
+  try {
+    await api(`/api/item?type=generation&id=${id}&permanent=true`, { method: "DELETE" });
+    loadGenerationHistory();
+  } catch (e) {
+    alert("删除失败：" + e.message);
+  }
+}
+window.deleteGenerationRecord = deleteGenerationRecord;
 
 async function copyGenResult() {
   if (!lastGenData) return;
