@@ -47,15 +47,23 @@ function checkPasscode(request, env) {
 }
 
 async function callGemini(env, { system, parts, maxTokens = 2000 }) {
-  const resp = await fetch(`${GEMINI_API_URL}/${MODEL}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
+  if (!env.GEMINI_API_KEY) {
+    throw new Error("Cloudflare 尚未配置 GEMINI_API_KEY");
+  }
+
+  const resp = await fetch(`${GEMINI_API_URL}/${MODEL}:generateContent`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-goog-api-key": env.GEMINI_API_KEY,
     },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
       systemInstruction: system ? { parts: [{ text: system }] } : undefined,
-      generationConfig: { maxOutputTokens: maxTokens },
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        responseMimeType: "application/json",
+      },
     }),
   });
   if (!resp.ok) {
@@ -242,7 +250,7 @@ async function handleGenerate(request, env) {
     return json({ error: "资源库里还没有竞品分析数据，请先上传竞品图片" }, 400);
   }
 
-  // 第一步：用 Claude 做语义相关性排序，代替向量检索
+  // 第一步：用 Gemini 做语义相关性排序，代替向量检索
   const summaries = competitors.map((c) => ({
     id: c.id,
     brand: c.brand,
@@ -344,7 +352,7 @@ export default {
         }
         return json({ error: "接口不存在" }, 404);
       } catch (err) {
-        // 统一兜底：任何未预料的报错都以 JSON 形式返回真实错误信息，
+        // 统一兜底：任何未预斝的报错都以 JSON 形式返回真实错误信息，
         // 避免前端看到 Cloudflare 自己的 HTML/纯文本错误页导致"看不懂的500"
         return json({ error: `服务器处理出错：${err.message || String(err)}` }, 500);
       }
