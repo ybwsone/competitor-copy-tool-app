@@ -1,8 +1,8 @@
 // ===================== 竞品文案分析工具 - Cloudflare Worker 后端 =====================
 // 功能：团队口令校验 / 竞品图片分析 / 产品资料存储 / 检索匹配 / 一键生成文案
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-6";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const MODEL = "gemini-3.7-flash";
 
 const COMPETITOR_SCHEMA_PROMPT = `你是一位资深电商文案分析师。我会给你一张或多张竞品主图/详情页截图（同一款产品的不同部分），请你分析后严格按以下 JSON schema 输出，不要输出任何 schema 之外的文字，不要用 markdown 代码块包裹：
 
@@ -46,28 +46,26 @@ function checkPasscode(request, env) {
   return provided && provided === env.TEAM_PASSCODE;
 }
 
-async function callClaude(env, { system, messages, maxTokens = 2000 }) {
-  const resp = await fetch(ANTHROPIC_API_URL, {
+async function callGemini(env, { system, parts, maxTokens = 2000 }) {
+  const resp = await fetch(`${GEMINI_API_URL}/${MODEL}:generateContent`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
+      "x-goog-api-key": env.GEMINI_API_KEY,
     },
     body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      system,
-      messages,
+      contents: [{ role: "user", parts }],
+      systemInstruction: system ? { parts: [{ text: system }] } : undefined,
+      generationConfig: { maxOutputTokens: maxTokens },
     }),
   });
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`Claude API error ${resp.status}: ${text}`);
+    throw new Error(`Gemini API error ${resp.status}: ${text}`);
   }
   const data = await resp.json();
-  const textBlock = data.content.find((b) => b.type === "text");
-  return textBlock ? textBlock.text : "";
+  const responseParts = data.candidates?.[0]?.content?.parts || [];
+  return responseParts.map((p) => p.text || "").join("");
 }
 
 function extractJson(text) {
@@ -98,18 +96,16 @@ async function handleAnalyzeCompetitor(request, env) {
     return json({ error: "缺少图片" }, 400);
   }
 
-  const content = images.map((img) => ({
-    type: "image",
-    source: { type: "base64", media_type: img.mimeType, data: img.base64 },
+  const parts = images.map((img) => ({
+    inline_data: { mime_type: img.mimeType, data: img.base64 },
   }));
-  content.push({
-    type: "text",
+  parts.push({
     text: `品牌：${brand || "未填写"}；产品名：${productName || "未填写"}；品类：${category || "未填写"}；备注：${notes || "无"}`,
   });
 
-  const resultText = await callClaude(env, {
+  const resultText = await callGemini(env, {
     system: COMPETITOR_SCHEMA_PROMPT,
-    messages: [{ role: "user", content }],
+    parts,
     maxTokens: 1500,
   });
 
@@ -260,12 +256,11 @@ async function handleGenerate(request, env) {
     },
   }));
 
-  const rankText = await callClaude(env, {
+  const rankText = await callGemini(env, {
     system: `你是文案框架检索助手。给你一份产品简介和一批竞品摘要，请按"文案框架参考价值"从高到低排序，返回最相关的最多5个竞品的 id 数组，格式：{"ids": ["id1","id2",...]}，只输出 JSON。`,
-    messages: [
+    parts: [
       {
-        role: "user",
-        content: `产品简介：${JSON.stringify(product)}\n\n附加说明：${brief || "无"}\n\n竞品摘要列表：${JSON.stringify(summaries)}`,
+        text: `产品简介：${JSON.stringify(product)}\n\n附加说明：${brief || "无"}\n\n竞品摘要列表：${JSON.stringify(summaries)}`,
       },
     ],
     maxTokens: 500,
@@ -282,7 +277,7 @@ async function handleGenerate(request, env) {
   const finalSelected = selected.length > 0 ? selected : competitors.slice(0, 3);
 
   // 第二步：套框架生成文案
-  const genText = await callClaude(env, {
+  const genText = await callGemini(env, {
     system: `你是电商文案策划。请参考给定的竞品文案框架结构（仅结构，不是原文），结合我方产品信息，原创生成文案。输出严格按以下 JSON 格式，不要输出其他内容：
 {
   "主图文案候选": ["", "", ""],
@@ -290,10 +285,9 @@ async function handleGenerate(request, env) {
   "信息缺口提示": ""
 }
 主图文案每条不超过15字。详情页文案框架给方向和大纲，不用写成品文案。如果我方产品信息中缺少某个竞品常用的卖点角度，在"信息缺口提示"里说明。`,
-    messages: [
+    parts: [
       {
-        role: "user",
-        content: `【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品信息】\n${JSON.stringify(product)}\n\n【附加要求】\n${brief || "无"}`,
+        text: `【竞品框架参考】\n${JSON.stringify(finalSelected.map((c) => c.analysis))}\n\n【我方产品信息】\n${JSON.stringify(product)}\n\n【附加要求】\n${brief || "无"}`,
       },
     ],
     maxTokens: 2000,
@@ -327,28 +321,34 @@ export default {
       if (!checkPasscode(request, env)) {
         return json({ error: "未授权，请重新登录" }, 401);
       }
-      if (url.pathname === "/api/analyze-competitor" && request.method === "POST") {
-        return handleAnalyzeCompetitor(request, env);
+      try {
+        if (url.pathname === "/api/analyze-competitor" && request.method === "POST") {
+          return await handleAnalyzeCompetitor(request, env);
+        }
+        if (url.pathname === "/api/save-product" && request.method === "POST") {
+          return await handleSaveProduct(request, env);
+        }
+        if (url.pathname === "/api/library" && request.method === "GET") {
+          return await handleListLibrary(request, env);
+        }
+        if (url.pathname === "/api/item" && request.method === "DELETE") {
+          return await handleDeleteItem(request, env);
+        }
+        if (url.pathname === "/api/item" && request.method === "PUT") {
+          return await handleUpdateItem(request, env);
+        }
+        if (url.pathname === "/api/generate" && request.method === "POST") {
+          return await handleGenerate(request, env);
+        }
+        if (url.pathname === "/api/bulk-import" && request.method === "POST") {
+          return await handleBulkImport(request, env);
+        }
+        return json({ error: "接口不存在" }, 404);
+      } catch (err) {
+        // 统一兜底：任何未预料的报错都以 JSON 形式返回真实错误信息，
+        // 避免前端看到 Cloudflare 自己的 HTML/纯文本错误页导致"看不懂的500"
+        return json({ error: `服务器处理出错：${err.message || String(err)}` }, 500);
       }
-      if (url.pathname === "/api/save-product" && request.method === "POST") {
-        return handleSaveProduct(request, env);
-      }
-      if (url.pathname === "/api/library" && request.method === "GET") {
-        return handleListLibrary(request, env);
-      }
-      if (url.pathname === "/api/item" && request.method === "DELETE") {
-        return handleDeleteItem(request, env);
-      }
-      if (url.pathname === "/api/item" && request.method === "PUT") {
-        return handleUpdateItem(request, env);
-      }
-      if (url.pathname === "/api/generate" && request.method === "POST") {
-        return handleGenerate(request, env);
-      }
-      if (url.pathname === "/api/bulk-import" && request.method === "POST") {
-        return handleBulkImport(request, env);
-      }
-      return json({ error: "接口不存在" }, 404);
     }
 
     // 静态资源交给 assets
