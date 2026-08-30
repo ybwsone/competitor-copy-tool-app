@@ -401,6 +401,7 @@ async function handleSaveProduct() {
     .filter(Boolean);
   const notes = document.getElementById("prod-notes").value.trim();
   const submittedBy = document.getElementById("prod-submitter").value.trim();
+  const files = document.getElementById("prod-images").files;
   const statusEl = document.getElementById("prod-status");
 
   if (!productName) {
@@ -410,12 +411,23 @@ async function handleSaveProduct() {
   }
 
   try {
+    const fileList = Array.from(files || []).slice(0, 5);
+    if ((files?.length || 0) > 5) {
+      statusEl.textContent = "最多保存5张图片，将只使用前5张";
+      statusEl.className = "status";
+    } else if (fileList.length > 0) {
+      statusEl.textContent = `正在压缩并保存 ${fileList.length} 张产品图片...`;
+      statusEl.className = "status";
+    }
+    const images = await Promise.all(fileList.map((file) => resizeImageForAnalysis(file, 1600, 0.75)));
+    const thumbnail = fileList.length > 0 ? await fileToThumbnail(fileList[0]) : "";
     await api("/api/save-product", {
       method: "POST",
-      body: JSON.stringify({ productName, category, material, fit, craft, scene, sellingPoints, notes, submittedBy }),
+      body: JSON.stringify({ productName, category, material, fit, craft, scene, sellingPoints, notes, submittedBy, images, thumbnail }),
     });
     statusEl.textContent = "保存成功";
     statusEl.className = "status success-text";
+    document.getElementById("prod-images").value = "";
     loadProducts();
   } catch (e) {
     statusEl.textContent = "保存失败：" + e.message;
@@ -467,6 +479,9 @@ function renderProductCard(r) {
   const detailHtml = isExpanded
     ? `
       <div style="margin-top:10px;font-size:12px;color:#555;border-top:1px solid #eee;padding-top:10px">
+        ${(r.images || []).length > 0 ? `<div class="product-image-gallery">${r.images
+          .map((img, index) => `<img src="data:${img.mimeType || "image/jpeg"};base64,${img.base64}" alt="产品图片${index + 1}" />`)
+          .join("")}</div>` : ""}
         <div><b>面料/材质：</b>${r.material || "-"}</div>
         <div><b>版型特点：</b>${r.fit || "-"}</div>
         <div><b>工艺细节：</b>${r.craft || "-"}</div>
@@ -477,10 +492,13 @@ function renderProductCard(r) {
 
   return `
     <div class="item-card">
-      <div style="cursor:pointer" onclick="toggleExpand('product','${r.id}')">
-        <div class="item-title">${r.productName}</div>
-        <div class="item-meta">${r.category || ""} · ${r.submittedBy ? "提交人：" + r.submittedBy + " · " : ""}${new Date(r.createdAt).toLocaleString()}</div>
-        <div class="item-tags">${(r.sellingPoints || []).map((t) => `<span class="tag">${t}</span>`).join("")}</div>
+      <div class="item-card-body" style="cursor:pointer" onclick="toggleExpand('product','${r.id}')">
+        ${r.thumbnail ? `<img class="item-thumb" src="${r.thumbnail}" alt="产品缩略图" />` : `<div class="item-thumb-placeholder"></div>`}
+        <div style="flex:1">
+          <div class="item-title">${r.productName}</div>
+          <div class="item-meta">${r.category || ""} · ${(r.images || []).length ? `${r.images.length}张图片 · ` : ""}${r.submittedBy ? "提交人：" + r.submittedBy + " · " : ""}${new Date(r.createdAt).toLocaleString()}</div>
+          <div class="item-tags">${(r.sellingPoints || []).map((t) => `<span class="tag">${t}</span>`).join("")}</div>
+        </div>
       </div>
       ${detailHtml}
       <div class="result-actions" style="margin-top:8px">
@@ -692,6 +710,7 @@ document.getElementById("passcode-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleLogin();
 });
 document.getElementById("comp-analyze-btn").addEventListener("click", handleAnalyzeCompetitor);
+attachDropzone(document.getElementById("prod-image-dropzone"), document.getElementById("prod-images"));
 
 // ---------- 批量导入 JSON（用于恢复历史数据，避免手动粘贴控制台出错）----------
 async function handleBulkImportFile() {
